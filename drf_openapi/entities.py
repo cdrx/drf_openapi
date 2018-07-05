@@ -159,7 +159,9 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         fields = self.get_path_fields(path, method, view)
         fields += self.get_serializer_fields(path, method, view, version=version, method_func=method_func)
         fields += view.schema.get_pagination_fields(path, method)
-        fields += view.schema.get_filter_fields(path, method)
+        if method == 'GET' and '{id}' not in path:
+            # change: only show filter fields on the main list, not on the detail views
+            fields += view.schema.get_filter_fields(path, method)
 
         if fields and any([field.location in ('form', 'body') for field in fields]):
             encoding = view.schema.get_encoding(path, method)
@@ -312,11 +314,6 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         Return a list of `coreapi.Field` instances corresponding to any
         request body input, as determined by the serializer class.
         """
-        if method in ('PUT', 'PATCH', 'POST'):
-            location = 'form'
-        else:
-            location = 'query'
-
         serializer_class = self.get_serializer_class(view, method_func)
         if not serializer_class:
             return []
@@ -326,7 +323,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             return [
                 Field(
                     name='data',
-                    location=location,
+                    location='body',
                     required=True,
                     schema=coreschema.Array()
                 )
@@ -340,13 +337,16 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             if field.read_only or isinstance(field, serializers.HiddenField):
                 continue
 
+            if method not in ('PUT', 'PATCH', 'POST'):
+                continue
+
             required = field.required and method != 'PATCH'
             # if the attribute ('help_text') of this field is a lazy translation object, force it to generate a string
             description = str(field.help_text) if isinstance(field.help_text, Promise) else field.help_text
             fallback_schema = self.fallback_schema_from_field(field)
             field = Field(
                 name=field.field_name,
-                location=location,
+                location='form',
                 required=required,
                 schema=fallback_schema if fallback_schema else field_to_schema(field),
                 description=description,
